@@ -1,0 +1,97 @@
+Es necesario conocer la ip usando el comando ipconfig en el cmd
+1. Estan en la carpeta sharding
+	1.1 Primero vamos a levantar el servidor de configuracion
+2. iniciamos los replicaSet: 
+	-docker-compose -f config-server/docker-compose.yaml up -d
+	-mongo mongodb://192.168.1.4:30001
+
+rs.initiate({
+    _id: "cfgrs",
+    configsvr: true,
+    members: [
+      { _id : 0, host : "192.168.1.4:30001" },
+      { _id : 1, host : "192.168.1.4:30002" },
+      { _id : 2, host : "192.168.1.4:30003" }
+    ]
+  }
+)
+
+Ejecutamos: rs.status()
+
+control + c para salir
+
+Vamos con el primer shard
+docker-compose -f shard1/docker-compose.yaml up -d
+
+docker ps
+
+mongo mongodb://192.168.1.4:31001
+
+rs.initiate(
+  {
+    _id: "shard1rs",
+    members: [
+      { _id : 0, host : "192.168.1.4:31001" },
+      { _id : 1, host : "192.168.1.4:31002" },
+      { _id : 2, host : "192.168.1.4:31003" }
+    ]
+  }
+)
+
+
+Creamos el mongos
+docker-compose -f mongos/docker-compose.yaml up -d
+
+mongo mongodb://192.168.1.4:32000
+
+Agregamos los shards a mongos 
+mongos> sh.addShard("shard1rs/192.168.1.4:31001,192.168.1.4:31002,192.168.1.4:31003")
+mongos> sh.status()
+
+Agregamos un segundo shards
+
+docker-compose -f shard2/docker-compose.yaml up -d
+mongo mongodb://192.168.1.4:31004
+
+rs.initiate(
+  {
+    _id: "shard2rs",
+    members: [
+      { _id : 0, host : "192.168.1.4:31004" },
+      { _id : 1, host : "192.168.1.4:31005" },
+      { _id : 2, host : "192.168.1.4:31006" }
+    ]
+  }
+)
+
+rs.status()
+rs.status()
+
+Ahora nos conectamos a mongos
+mongo mongodb://192.168.1.4:32000
+
+Agregamos el nuevo shard
+
+mongos> sh.addShard("shard2rs/192.168.1.4:31004,192.168.1.4:31005,192.168.1.4:31006")
+mongos> sh.status()
+
+
+
+-------------------------------------------------
+Agregando datos
+Es necesario habilitar el sharding en cada coleccion para poder usarlos como tal
+para saber si una collection tiene habilitado el sharding usamos : db.<nombreCollection>.getShardDistribution()
+Habilitamos el sharding con: 
+> sh.enableSharding("<nombre_db>")
+> sh.shardCollection("<nombre_db>.<nombre_collection>", { shardKey })
+	Por ejemplo: sh.shardCollection("demo.movies", { "title": "hashed" })
+
+Si necesitamos crear un indice en una coleccion (creo que este error sucede cuando la coleccion ya tiene docs)
+db.<collecion>.createIndex({"<campo>": "hashed"})
+
+Es necesario ser cuidadoso a la hora de elegir la shardKey
+"Porque una vez que hemos creado nuestra shardkey y haber habilitado el sharding para la coleccion y los datos
+ son fragmentados entre los multiples Clusters, después si quieres cambiar la shardkey Sería muy difícil, tiene
+ que volcar la base de datos, volcar la colección externamente y luego restaurar el volcado con una clave de
+ fragmento diferente o algo así, será una operación muy costosa, así que piense sabiamente y hágalo bien en el
+ primer intento"
